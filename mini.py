@@ -14,3 +14,5 @@ print("VDIV attuale:", scope.query("C1:VDIV?"))
 scope.write("C1:VDIV 20mV")
 
 print("VDIV nuovo:", scope.query("C1:VDIV?"))
+
+scope.write(":SYSTEM:LOCAL")
