@@ -10,6 +10,11 @@ __pycache__/
 Scripts/
 Lib/
 Include/
+lib/
+bin/
+include/
+lib64
+pyenv.cfg
 .Python
 build/
 develop-eggs/

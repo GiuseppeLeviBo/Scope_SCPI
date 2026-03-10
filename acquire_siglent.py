@@ -51,3 +51,4 @@ wf2 = get_waveform(2)
 
 print("CH1 bytes:", len(wf1))
 print("CH2 bytes:", len(wf2))
+scope.write(":SYSTEM:LOCAL")
