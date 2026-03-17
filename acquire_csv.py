@@ -38,13 +38,10 @@ def acquire(channel=1):
 
     ch = f"C{channel}"
 
-    print("\nSTOP acquisition")
-    scope.write("STOP")
-    time.sleep(0.5)
     scope.write("WFSU SP,0")
     scope.write("WFSU NP,0")
 
-    print("Leggo descriptor")
+    print(f"\nLeggo descriptor {ch}")
 
     scope.write(f"{ch}:WF? DESC")
     raw = scope.read_raw()
@@ -102,31 +99,58 @@ def acquire(channel=1):
     volts = volts * 2.0  # <-- De-commenta questo se probe_att è 1.0 e l'errore persiste
     time_axis = np.arange(len(volts)) * h_int + h_off
 
-    scope.write("RUN")
-
     return time_axis, volts
 
 
-t, v = acquire(1)
-print("samples:", len(v))
-print("min:", np.min(v))
-print("max:", np.max(v))
-print("Salvo CSV")
+print("\nAvvio Auto Setup (ASET)...")
+scope.write("ASET")
+time.sleep(6)  # Attendiamo il termine dell'autosetup e stabilizzazione del trigger
+
+print("\nSTOP acquisition")
+scope.write("STOP")
+time.sleep(1)
+
+print("\nAcquisisco CH1...")
+t1, v1 = acquire(1)
+
+print("\nAcquisisco CH2...")
+t2, v2 = acquire(2)
+
+print("\nRiprendo l'acquisizione (RUN)")
+scope.write("RUN")
+
+print("\nCH1 samples:", len(v1), "min:", np.min(v1), "max:", np.max(v1))
+print("CH2 samples:", len(v2), "min:", np.min(v2), "max:", np.max(v2))
+
+# Calcolo dello sfasamento / ritardo temporale usando cross-correlazione (ritardo di CH2 rispetto a CH1)
+if len(v1) > 0 and len(v2) > 0:
+    corr = np.correlate(v1 - np.mean(v1), v2 - np.mean(v2), mode="full")
+    delay_idx = np.argmax(corr) - (len(v2) - 1)
+    dt = t1[1] - t1[0] if len(t1) > 1 else 1.0
+    time_delay = delay_idx * dt
+    print(f"\nRitardo temporale stimato CH2 vs CH1: {time_delay:.6e} s")
+else:
+    time_delay = 0.0
+
+print("\nSalvo CSV")
 
 with open("waveform.csv","w",newline="") as f:
 
     writer = csv.writer(f)
-    writer.writerow(["time_s","voltage_V"])
+    writer.writerow(["time_s","voltage_CH1_V","voltage_CH2_V"])
 
-    for ti,vi in zip(t,v):
-        writer.writerow([ti,vi])
+    length = min(len(t1), len(t2))
+    for i in range(length):
+        writer.writerow([t1[i], v1[i], v2[i]])
 
 print("CSV salvato")
 
-plt.plot(t,v)
+plt.plot(t1, v1, label="CH1")
+plt.plot(t2, v2, label="CH2")
 plt.xlabel("time (s)")
 plt.ylabel("voltage (V)")
-plt.title("Oscilloscope waveform")
+plt.title(f"Oscilloscope waveforms\nFase/Ritardo: {time_delay:.2e} s")
+plt.legend()
 plt.show()
 
 scope.write(":SYSTEM:LOCAL")
