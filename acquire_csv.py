@@ -10,6 +10,11 @@ matplotlib.use("TkAgg")
 
 IP = "192.168.137.220"
 
+# Alcuni firmware Siglent SDS1000 DL/CML restituiscono un vertical_gain
+# dimezzato. Lasciamo il workaround esplicito e configurabile, invece di
+# rimuoverlo silenziosamente. Imposta a 1.0 per disattivarlo.
+SIGLENT_FIRMWARE_GAIN_FIX_FACTOR = 2.0
+
 rm = pyvisa.ResourceManager()
 scope = rm.open_resource(f"TCPIP0::{IP}::inst0::INSTR")
 
@@ -58,11 +63,8 @@ def acquire(channel=1):
     v_offset = struct.unpack("<f", desc[160:164])[0]
     h_int    = struct.unpack("<f", desc[176:180])[0]
     h_off    = struct.unpack("<d", desc[180:188])[0]
-    # NOVITA': Leggiamo l'attenuazione della sonda all'offset 328
-    probe_att = struct.unpack("<f", desc[328:332])[0]
     print("Vertical gain:", v_gain)
     print("Vertical offset:", v_offset)
-    print("Probe attenuation:", probe_att)
     print("Horizontal interval:", h_int)
     sample_rate = 1 / h_int
     print("Sample rate:", sample_rate/1e6, "MS/s")
@@ -91,12 +93,17 @@ def acquire(channel=1):
         samples = np.frombuffer(data, dtype=np.int16)
     print("raw min:", samples.min())
     print("raw max:", samples.max())
-    # Formula corretta: Voltage = Data * v_gain * probe_att - v_offset
-    volts = samples.astype(np.float32) * v_gain * probe_att - v_offset
-    # Fix per il noto bug firmware Siglent SDS1000 DL/CML
-    # Se noti ancora un fattore 2 mancante, l'hardware sta restituendo
-    # il guadagno dimezzato nativamente.
-    volts = volts * 2.0  # <-- De-commenta questo se probe_att è 1.0 e l'errore persiste
+    # Formula dal descriptor WAVEDESC: tensione = campione * vertical_gain - vertical_offset
+    # Non va moltiplicata di nuovo per l'attenuazione della sonda: quel fattore è
+    # già incorporato nei parametri verticali restituiti dallo strumento.
+    volts = samples.astype(np.float32) * v_gain - v_offset
+
+    # Workaround esplicito per il noto bug firmware Siglent SDS1000 DL/CML.
+    # Se il tuo strumento non mostra il problema, imposta
+    # SIGLENT_FIRMWARE_GAIN_FIX_FACTOR = 1.0.
+    if SIGLENT_FIRMWARE_GAIN_FIX_FACTOR != 1.0:
+        print("Applying firmware gain fix factor:", SIGLENT_FIRMWARE_GAIN_FIX_FACTOR)
+        volts = volts * SIGLENT_FIRMWARE_GAIN_FIX_FACTOR
     time_axis = np.arange(len(volts)) * h_int + h_off
 
     return time_axis, volts
@@ -134,14 +141,27 @@ else:
 
 print("\nSalvo CSV")
 
-with open("waveform.csv","w",newline="") as f:
 
-    writer = csv.writer(f)
-    writer.writerow(["time_s","voltage_CH1_V","voltage_CH2_V"])
+def format_csv_value(value):
+    # Usiamo una stringa in notazione scientifica per evitare che l'apertura del
+    # file in Excel/LibreOffice cambi la rappresentazione dei float piccoli.
+    return f"{float(value):.9e}"
+
+
+with open("waveform.csv", "w", newline="", encoding="utf-8") as f:
+
+    # In locale italiano i fogli di calcolo interpretano molto meglio il CSV con
+    # separatore ';' rispetto alla virgola quando i numeri usano il punto decimale.
+    writer = csv.writer(f, delimiter=";")
+    writer.writerow(["time_s", "voltage_CH1_V", "voltage_CH2_V"])
 
     length = min(len(t1), len(t2))
     for i in range(length):
-        writer.writerow([t1[i], v1[i], v2[i]])
+        writer.writerow([
+            format_csv_value(t1[i]),
+            format_csv_value(v1[i]),
+            format_csv_value(v2[i]),
+        ])
 
 print("CSV salvato")
 
